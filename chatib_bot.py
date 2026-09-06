@@ -6,6 +6,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select
 from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.chrome.options import Options
 from flask import Flask
 import threading
 import time
@@ -24,23 +26,24 @@ app = Flask(__name__)
 def generate_letter_string(length=6):
     return "".join(random.choices(string.ascii_letters, k=length))
 
+
 def setup_driver():
-    """Headless Firefox driver for VPS."""
+    """Headless Chrome driver for Render."""
     options = Options()
-    options.add_argument("--headless")
+    options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-
-    # Anti-detection
-    options.set_preference("dom.webdriver.enabled", False)
-    options.set_preference("useAutomationExtension", False)
-    options.set_preference(
-        "general.useragent.override",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-features=NetworkService")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-features=VizDisplayCompositor")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument(
+        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
 
-    service = FirefoxService(executable_path="/usr/local/bin/geckodriver")
-    driver = webdriver.Firefox(service=service, options=options)
+    service = ChromeService(executable_path="/usr/local/bin/chromedriver")
+    driver = webdriver.Chrome(service=service, options=options)
 
     driver.execute_script(
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
