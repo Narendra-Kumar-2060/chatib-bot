@@ -153,6 +153,7 @@ def monitor_and_play(page, bot_username):
     poll_interval = 1
     last_activity = time.time()
     paused = False
+    ADMIN_COMMANDS = {"!pause", "!resume", "!status", "!newtarget", "!stop"}
 
     while True:
         if "chatibrooms" not in page.url:
@@ -162,12 +163,7 @@ def monitor_and_play(page, bot_username):
         if time.time() - last_activity > 60:
             print("⚠️ No activity for 60 seconds. Refreshing page...")
             page.reload()
-            # NOTE: reload() does not clear the room's chat history, so we
-            # deliberately do NOT reset processed_count here — doing so
-            # would make the bot treat every old message as new again and
-            # reply to all of them in a burst. The shrink-safety check
-            # below still catches it if the reload genuinely returns fewer
-            # messages than we'd already processed.
+            processed_count = 0  # DOM reset — start scanning from scratch
             last_activity = time.time()
             continue
 
@@ -199,7 +195,10 @@ def monitor_and_play(page, bot_username):
 
                 # ---------------- ADMIN COMMANDS ----------------
                 # Not subject to the one-per-poll limit or pause state.
-                if user == ADMIN_USERNAME and lower_msg.startswith("!"):
+                # Only intercepts KNOWN admin commands — anything else
+                # (like the admin's own !guess) falls through to normal
+                # game logic below instead of being silently swallowed.
+                if user == ADMIN_USERNAME and lower_msg in ADMIN_COMMANDS:
                     if lower_msg == "!pause":
                         paused = True
                         send_message(page, "⏸️ Game paused by admin.")
