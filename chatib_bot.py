@@ -13,6 +13,13 @@ ROOM_URL = "https://www.chatibrooms.com/user/chatroom/philosophy-chat-room"
 TOKEN_URL = "https://www.chatib.us/auth/generateSsoToken/philosophy-chat-room"
 WAIT_TIMEOUT = 30
 
+# ---------- Proxy List (optional) ----------
+PROXIES = [
+    # Add your proxies here, e.g.:
+    # "http://user:pass@proxy1:8080",
+    # "http://proxy2:8080",
+]
+
 def generate_letter_string(length=6):
     return "".join(random.choices(string.ascii_letters, k=length))
 
@@ -20,7 +27,7 @@ def send_message(page, text):
     try:
         page.fill("#contenteditablediv", text)
         page.click(".msg_send_btn")
-        time.sleep(0.5)
+        time.sleep(0.2)                     # Faster
         return True
     except Exception as e:
         print(f"⚠️ Failed to send message: {e}")
@@ -132,9 +139,22 @@ def monitor_and_play(page, bot_username):
     send_message(page, "I'm thinking of a number between 1 and 100.")
 
     seen = set()
-    poll_interval = 2
+    poll_interval = 1                 # Faster
+    last_activity = time.time()
 
     while True:
+        # Check if we're still on the room page (IP ban detection)
+        if "chatibrooms" not in page.url:
+            print("⚠️ Redirected away from room page – possible IP ban.")
+            break
+
+        # Timeout detection for hung browser
+        if time.time() - last_activity > 60:
+            print("⚠️ No activity for 60 seconds. Refreshing page...")
+            page.reload()
+            last_activity = time.time()
+            continue
+
         try:
             elements = page.query_selector_all(".received_withd_msg")
             for elem in elements:
@@ -177,18 +197,30 @@ def monitor_and_play(page, bot_username):
                     send_message(page, f"Too high, {user}!")
 
             time.sleep(poll_interval)
+            last_activity = time.time()
 
         except Exception as e:
             print(f"⚠️ Error in monitor loop: {e}")
             time.sleep(poll_interval)
 
 def main():
+    proxy_index = 0
+    retry_count = 0
+    max_retries = 5
+
     while True:
         try:
+            # Proxy support
+            browser_args = ["--no-sandbox", "--disable-dev-shm-usage"]
+            if PROXIES:
+                proxy = PROXIES[proxy_index % len(PROXIES)]
+                browser_args.append(f"--proxy-server={proxy}")
+                print(f"🔄 Using proxy: {proxy}")
+
             with sync_playwright() as p:
                 browser = p.chromium.launch(
                     headless=True,
-                    args=["--no-sandbox", "--disable-dev-shm-usage"]
+                    args=browser_args
                 )
                 page = browser.new_page()
                 print("✅ Browser launched")
@@ -200,16 +232,28 @@ def main():
                 final_url = navigate_to_room(page)
 
                 if "chatibrooms" in final_url:
+                    retry_count = 0
                     monitor_and_play(page, username)
                 else:
                     print(f"⚠️ Not on room page – retrying...")
+                    retry_count += 1
 
                 browser.close()
                 print("🔄 Session ended, restarting...")
 
         except Exception as e:
             print(f"\n❌ ERROR: {e}")
-            time.sleep(10)
+            retry_count += 1
+
+        # Rotate proxy or wait if too many failures
+        if retry_count >= max_retries:
+            if PROXIES:
+                proxy_index += 1
+                print(f"🔄 Rotating to next proxy")
+            else:
+                print("⏳ Too many retries – waiting 5 minutes before retry...")
+                time.sleep(300)      # 5 min cooldown
+            retry_count = 0
 
         time.sleep(5)
 
