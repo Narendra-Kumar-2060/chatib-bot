@@ -72,7 +72,7 @@ def login(driver, wait):
     print("\n--- Logging in ---")
     random_username = generate_letter_string(6)
     random_number = random.randint(1000, 9999)
-    full_username = f"LemonTree{random_number}"
+    full_username = f"bgghvf{random_number}"
 
     try:
         username_field = wait.until(
