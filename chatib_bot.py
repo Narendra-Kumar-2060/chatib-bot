@@ -317,10 +317,22 @@ def home():
     return "Chatib Bot is running!"
 
 if __name__ == "__main__":
+    import sys
+
+    def run_bot():
+        try:
+            print("🚀 Bot thread started")
+            main()
+        except Exception as e:
+            print(f"❌ Bot thread crashed: {e}")
+            import traceback
+            traceback.print_exc()
+
     # Start the bot in a background thread
-    bot_thread = threading.Thread(target=main)
+    bot_thread = threading.Thread(target=run_bot)
     bot_thread.daemon = True
     bot_thread.start()
-    
+    print("✅ Bot thread launched")
+
     # Run the web server
     app.run(host='0.0.0.0', port=8080)
