@@ -41,15 +41,14 @@ def setup_driver():
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
 
-    # Automatically downloads the matching ChromeDriver
-    service = Service(ChromeDriverManager().install())
+    # Use the system driver built into the image
+    service = Service(executable_path="/usr/local/bin/chromedriver")
     driver = webdriver.Chrome(service=service, options=options)
 
     driver.execute_script(
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     )
     return driver
-
 
 def send_message(driver, text):
     try:
