@@ -1,0 +1,303 @@
+from selenium import webdriver
+from selenium.webdriver.firefox.service import Service as FirefoxService
+from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import Select
+from selenium.common.exceptions import TimeoutException
+import time
+import random
+import string
+
+# ---------- Configuration ----------
+SITE_URL = "https://www.chatib.us"
+ROOM_URL = "https://www.chatibrooms.com/user/chatroom/philosophy-chat-room"
+TOKEN_URL = "https://www.chatib.us/auth/generateSsoToken/philosophy-chat-room"
+WAIT_TIMEOUT = 30
+
+# ---------- Helper Functions ----------
+def generate_letter_string(length=6):
+    return "".join(random.choices(string.ascii_letters, k=length))
+
+def setup_driver():
+    """Headless Firefox driver for VPS."""
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+
+    # Anti-detection
+    options.set_preference("dom.webdriver.enabled", False)
+    options.set_preference("useAutomationExtension", False)
+    options.set_preference(
+        "general.useragent.override",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    )
+
+    service = FirefoxService(executable_path="/usr/local/bin/geckodriver")
+    driver = webdriver.Firefox(service=service, options=options)
+
+    driver.execute_script(
+        "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+    )
+
+    return driver
+
+def send_message(driver, text):
+    try:
+        input_box = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "#contenteditablediv"))
+        )
+        input_box.click()
+        input_box.clear()
+        input_box.send_keys(text)
+        send_btn = driver.find_element(By.CSS_SELECTOR, ".msg_send_btn")
+        send_btn.click()
+        time.sleep(0.5)
+        return True
+    except Exception as e:
+        print(f"⚠️ Failed to send message: {e}")
+        return False
+
+def login(driver, wait):
+    print("\n--- Logging in ---")
+    random_username = generate_letter_string(6)
+    random_number = random.randint(1000, 9999)
+    full_username = f"LemonTree{random_number}"
+
+    try:
+        username_field = wait.until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "#username"))
+        )
+        username_field.send_keys(full_username)
+        print("✅ Username entered")
+    except TimeoutException:
+        print("❌ Username field not found.")
+        raise
+
+    try:
+        gender = wait.until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, ".checkmark-male"))
+        )
+        gender.click()
+        print("✅ Gender selected")
+    except TimeoutException:
+        raise
+
+    try:
+        age_select = Select(
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#age")))
+        )
+        age_select.select_by_visible_text("24")
+        print("✅ Age selected")
+    except TimeoutException:
+        raise
+
+    try:
+        country_select = Select(
+            wait.until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "#login_country"))
+            )
+        )
+        country_select.select_by_visible_text("United States")
+        print("✅ Country selected")
+    except TimeoutException:
+        raise
+
+    time.sleep(2)
+    try:
+        city_select = Select(
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#city")))
+        )
+        try:
+            city_select.select_by_visible_text("New York")
+        except:
+            if len(city_select.options) > 1:
+                city_select.select_by_index(1)
+                print(
+                    f"✅ City selected (fallback): {city_select.first_selected_option.text}"
+                )
+    except TimeoutException:
+        raise
+
+    try:
+        start_btn = wait.until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "#startChatNow"))
+        )
+        start_btn.click()
+        print("✅ Start button clicked")
+    except TimeoutException:
+        raise
+
+    time.sleep(2)
+    try:
+        accept_btn = wait.until(
+            EC.element_to_be_clickable(
+                (By.CSS_SELECTOR, ".btn.btn-primary.confirm_decline.agree")
+            )
+        )
+        accept_btn.click()
+        print("✅ TOS popup accepted")
+    except:
+        print("⚠️ TOS popup not found – continuing.")
+
+    print("✅ Login complete.")
+    return full_username
+
+def navigate_to_room(driver, wait):
+    print("\n--- Navigating to room ---")
+    try:
+        driver.get(TOKEN_URL)
+        print("✅ Token endpoint visited")
+        time.sleep(2)
+    except Exception as e:
+        print(f"❌ Failed to load token endpoint: {e}")
+        raise
+
+    if "chatibrooms" not in driver.current_url:
+        try:
+            driver.get(ROOM_URL)
+            print("✅ Room URL loaded")
+        except Exception as e:
+            print(f"❌ Failed to load room URL: {e}")
+            raise
+    else:
+        print("✅ Already on room page.")
+
+    try:
+        wait.until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, ".received_withd_msg"))
+        )
+        print("✅ Room messages detected.")
+    except TimeoutException:
+        print("⚠️ No messages yet, but room may be loading.")
+
+    print(f"📍 Final URL: {driver.current_url}")
+    return driver.current_url
+
+def parse_message(raw):
+    lines = raw.splitlines()
+    username_line = None
+    for line in lines:
+        if "| report |" in line:
+            username_line = line
+            break
+    if username_line:
+        user = username_line.split("|")[0].strip()
+        msg_lines = [l for l in lines if l != username_line]
+        msg = " ".join(msg_lines).strip()
+        return user, msg
+    return None, raw
+
+def monitor_and_play(driver, bot_username):
+    print("\n--- Game monitor started (Ctrl+C to stop) ---")
+    target = random.randint(1, 100)
+    game_active = True
+    print(f"🎯 (DEBUG) Target: {target}")
+
+    send_message(
+        driver,
+        "🎯 I'm thinking of a number between 1 and 100. Guess with `!guess <number>`",
+    )
+
+    seen = set()
+    poll_interval = 2
+
+    try:
+        while True:
+            try:
+                elements = driver.find_elements(By.CSS_SELECTOR, ".received_withd_msg")
+                for elem in elements:
+                    raw = elem.text.strip()
+                    if not raw:
+                        continue
+
+                    user, msg = parse_message(raw)
+                    if user == bot_username:
+                        continue
+                    if not msg.lower().startswith("!guess"):
+                        continue
+
+                    key = (user, msg)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+
+                    parts = msg.split()
+                    if len(parts) != 2:
+                        send_message(driver, f"❌ {user}, use: `!guess <number>`")
+                        continue
+
+                    try:
+                        guess = int(parts[1])
+                    except ValueError:
+                        send_message(
+                            driver, f"❌ {user}, please provide a valid number."
+                        )
+                        continue
+
+                    if not game_active:
+                        send_message(
+                            driver, "A new round has started! Use `!guess <number>`"
+                        )
+                        continue
+
+                    if guess == target:
+                        reply = (
+                            f"🎉 Correct, {user}! The number was {target}. New round!"
+                        )
+                        send_message(driver, reply)
+                        target = random.randint(1, 100)
+                        game_active = True
+                        seen.clear()
+                        print(f"🎯 (DEBUG) New target: {target}")
+                        send_message(
+                            driver,
+                            "🎯 I'm thinking of a new number between 1 and 100. Guess with `!guess <number>`",
+                        )
+                    elif guess < target:
+                        send_message(driver, f"📈 Too low, {user}!")
+                    else:
+                        send_message(driver, f"📉 Too high, {user}!")
+
+                time.sleep(poll_interval)
+
+            except Exception as e:
+                print(f"⚠️ Error in monitor loop: {e}")
+                time.sleep(poll_interval)
+
+    except KeyboardInterrupt:
+        print("\n🛑 Game monitor stopped.")
+
+def main():
+    driver = None
+    try:
+        driver = setup_driver()
+        wait = WebDriverWait(driver, WAIT_TIMEOUT)
+
+        driver.get(SITE_URL)
+        print("📄 Main page loaded")
+
+        username = login(driver, wait)
+        final_url = navigate_to_room(driver, wait)
+
+        if "chatibrooms" in final_url:
+            monitor_and_play(driver, username)
+        else:
+            print(f"⚠️ Not on room page – cannot start game.")
+
+        print("\n" + "=" * 50)
+        print("✅ SESSION COMPLETE!")
+        print(f"👤 Username: {username}")
+        print("=" * 50)
+
+    except Exception as e:
+        print(f"\n❌ ERROR: {e}")
+
+    finally:
+        if driver:
+            driver.quit()
+
+if __name__ == "__main__":
+    main()
