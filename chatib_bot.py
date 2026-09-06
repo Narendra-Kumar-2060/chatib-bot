@@ -144,13 +144,11 @@ def monitor_and_play(page, bot_username):
 
     send_message(page, "I'm thinking of a number between 1 and 100.")
 
-    # Track how many chat messages we've already scanned, so each message is
-    # processed exactly once — regardless of whether its text repeats
-    # something sent earlier. This replaces content-based dedup, which
-    # wrongly ignored a command/guess if the exact same text was ever sent
-    # before.
-    processed_count = 0
-    poll_interval = 1
+    # --- Track last processed messages ---
+    last_processed = None          # (user, msg, round) for game guesses
+    last_admin_raw = None          # raw text of last processed admin command
+
+    poll_interval = 0.5
     last_activity = time.time()
     paused = False
     ADMIN_COMMANDS = {"!pause", "!resume", "!status", "!newtarget", "!stop"}
@@ -163,111 +161,105 @@ def monitor_and_play(page, bot_username):
         if time.time() - last_activity > 60:
             print("⚠️ No activity for 60 seconds. Refreshing page...")
             page.reload()
-            processed_count = 0  # DOM reset — start scanning from scratch
+            # Reset tracking on reload
+            last_processed = None
+            last_admin_raw = None
             last_activity = time.time()
             continue
 
         try:
             elements = page.query_selector_all(".received_withd_msg")
+            if not elements:
+                time.sleep(poll_interval)
+                continue
 
-            # If the message list ever shrinks (e.g. unexpected DOM reset),
-            # our old count is stale — rescan from the top rather than
-            # silently skipping messages or crashing on a bad slice.
-            if processed_count > len(elements):
-                processed_count = 0
+            newest = elements[-1]
+            raw = newest.inner_text().strip()
+            if not raw:
+                time.sleep(poll_interval)
+                continue
 
-            new_elements = elements[processed_count:]
-            acted_this_poll = False  # only act on ONE game command per poll
-            stop_index = len(new_elements)  # how far into new_elements we got
+            user, msg = parse_message(raw)
+            if user is None or user == bot_username:
+                time.sleep(poll_interval)
+                continue
 
-            for idx, elem in enumerate(new_elements):
-                raw = elem.inner_text().strip()
-                if not raw:
+            lower_msg = msg.lower().strip()
+
+            # ---------------- ADMIN COMMANDS ----------------
+            # Admin commands are tracked by raw text (to avoid reprocessing the same message)
+            if user == ADMIN_USERNAME and lower_msg in ADMIN_COMMANDS:
+                # Skip if this exact raw message was already processed
+                if raw == last_admin_raw:
+                    time.sleep(poll_interval)
                     continue
+                last_admin_raw = raw
 
-                user, msg = parse_message(raw)
-                # Skip anything we couldn't attribute to a user, and skip
-                # the bot's own messages.
-                if user is None or user == bot_username:
-                    continue
-
-                lower_msg = msg.lower().strip()
-
-                # ---------------- ADMIN COMMANDS ----------------
-                # Not subject to the one-per-poll limit or pause state.
-                # Only intercepts KNOWN admin commands — anything else
-                # (like the admin's own !guess) falls through to normal
-                # game logic below instead of being silently swallowed.
-                if user == ADMIN_USERNAME and lower_msg in ADMIN_COMMANDS:
-                    if lower_msg == "!pause":
-                        paused = True
-                        send_message(page, "⏸️ Game paused by admin.")
-                    elif lower_msg == "!resume":
-                        paused = False
-                        send_message(page, "▶️ Game resumed by admin.")
-                    elif lower_msg == "!status":
-                        state = "paused" if paused else "running"
-                        send_message(
-                            page,
-                            f"ℹ️ Status: {state} | Round {round_number} | Target={target}",
-                        )
-                    elif lower_msg == "!newtarget":
-                        target = random.randint(1, 100)
-                        round_number += 1
-                        print(f"🎯 (DEBUG) Admin reset target: {target} (Round {round_number})")
-                        send_message(page, f"🎲 Admin reset the number. (Round {round_number})")
-                    elif lower_msg == "!stop":
-                        send_message(page, "🛑 Bot stopping (admin command).")
-                        print("🛑 Stopped via admin command.")
-                        return "stop"
-                    continue
-
-                if paused:
-                    continue
-
-                if not lower_msg.startswith("!guess"):
-                    continue
-
-                if acted_this_poll:
-                    # A guess already got a response this poll — stop here
-                    # and pick this message up on the *next* poll instead of
-                    # evaluating it against a target that may have just
-                    # changed underneath us.
-                    stop_index = idx
-                    break
-
-                parts = msg.split()
-                if len(parts) != 2:
-                    send_message(page, f"{user}, use: !guess [number]")
-                    acted_this_poll = True
-                    continue
-
-                try:
-                    guess = int(parts[1])
-                except ValueError:
-                    send_message(page, f"{user}, please provide a valid number.")
-                    acted_this_poll = True
-                    continue
-
-                if guess == target:
-                    reply = f"Correct, {user}! The number was {target}. New round!"
-                    send_message(page, reply)
-                    # ---- NEW ROUND ----
+                if lower_msg == "!pause":
+                    paused = True
+                    send_message(page, "⏸️ Game paused by admin.")
+                elif lower_msg == "!resume":
+                    paused = False
+                    send_message(page, "▶️ Game resumed by admin.")
+                elif lower_msg == "!status":
+                    state = "paused" if paused else "running"
+                    send_message(
+                        page,
+                        f"ℹ️ Status: {state} | Round {round_number} | Target={target}",
+                    )
+                elif lower_msg == "!newtarget":
                     target = random.randint(1, 100)
                     round_number += 1
-                    print(f"🎯 (DEBUG) New target: {target} (Round {round_number})")
-                    send_message(page, f"I'm thinking of a new number between 1 and 100. (Round {round_number})")
-                elif guess < target:
-                    send_message(page, f"Too low, {user}!")
-                else:
-                    send_message(page, f"Too high, {user}!")
+                    print(f"🎯 (DEBUG) Admin reset target: {target} (Round {round_number})")
+                    send_message(page, f"🎲 Admin reset the number. (Round {round_number})")
+                elif lower_msg == "!stop":
+                    send_message(page, "🛑 Bot stopping (admin command).")
+                    print("🛑 Stopped via admin command.")
+                    return "stop"
+                time.sleep(poll_interval)
+                continue
 
-                acted_this_poll = True
+            # If paused, ignore everything else
+            if paused:
+                time.sleep(poll_interval)
+                continue
 
-            # Mark as processed everything up through stop_index. If we
-            # deferred a guess (stop_index < len(new_elements)), that one
-            # and anything after it will be picked up again next poll.
-            processed_count += stop_index
+            if not lower_msg.startswith("!guess"):
+                time.sleep(poll_interval)
+                continue
+
+            # ---- Game guess: track with (user, msg, round) ----
+            current_key = (user, msg, round_number)
+            if current_key == last_processed:
+                # Same guess already processed in this round – skip
+                time.sleep(poll_interval)
+                continue
+            last_processed = current_key
+
+            parts = msg.split()
+            if len(parts) != 2:
+                send_message(page, f"{user}, use: !guess [number]")
+                time.sleep(poll_interval)
+                continue
+
+            try:
+                guess = int(parts[1])
+            except ValueError:
+                send_message(page, f"{user}, please provide a valid number.")
+                time.sleep(poll_interval)
+                continue
+
+            if guess == target:
+                reply = f"Correct, {user}! The number was {target}. New round!"
+                send_message(page, reply)
+                target = random.randint(1, 100)
+                round_number += 1
+                print(f"🎯 (DEBUG) New target: {target} (Round {round_number})")
+                send_message(page, f"I'm thinking of a new number between 1 and 100. (Round {round_number})")
+            elif guess < target:
+                send_message(page, f"Too low, {user}!")
+            else:
+                send_message(page, f"Too high, {user}!")
 
             time.sleep(poll_interval)
             last_activity = time.time()
@@ -275,7 +267,6 @@ def monitor_and_play(page, bot_username):
         except Exception as e:
             print(f"⚠️ Error in monitor loop: {e}")
             time.sleep(poll_interval)
-
             
 def main():
     proxy_index = 0
