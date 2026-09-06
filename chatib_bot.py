@@ -11,7 +11,7 @@ app = Flask(__name__)
 SITE_URL = "https://www.chatib.us"
 ROOM_URL = "https://www.chatibrooms.com/user/chatroom/sports-chat-room"
 TOKEN_URL = "https://www.chatib.us/auth/generateSsoToken/sports-chat-room"
-WAIT_TIMEOUT = 30
+WAIT_TIMEOUT = 60   # from 30
 ADMIN_USERNAME = "UnfriendLy"
 
 # ---------- Proxy List (optional) ----------
@@ -24,11 +24,32 @@ PROXIES = [
 def generate_letter_string(length=6):
     return "".join(random.choices(string.ascii_letters, k=length))
 
+def wait_and_fill(page, selector, text, timeout=WAIT_TIMEOUT):
+    """Wait for element, clear and fill it."""
+    try:
+        page.wait_for_selector(selector, timeout=timeout * 1000)
+        page.fill(selector, text)
+        return True
+    except Exception as e:
+        print(f"⚠️ Failed to fill {selector}: {e}")
+        return False
+
+def wait_and_click(page, selector, timeout=WAIT_TIMEOUT):
+    """Wait for element and click it."""
+    try:
+        page.wait_for_selector(selector, timeout=timeout * 1000)
+        page.click(selector)
+        return True
+    except Exception as e:
+        print(f"⚠️ Failed to click {selector}: {e}")
+        return False
+
 def send_message(page, text):
     try:
+        page.wait_for_selector("#contenteditablediv", timeout=5000)
         page.fill("#contenteditablediv", text)
         page.click(".msg_send_btn")
-        time.sleep(0.2)                     # Faster
+        time.sleep(0.2)
         return True
     except Exception as e:
         print(f"⚠️ Failed to send message: {e}")
@@ -40,48 +61,40 @@ def login(page):
     random_number = random.randint(1000, 9999)
     full_username = f"LemonTree{random_number}"
 
-    try:
-        page.fill("#username", full_username)
-        print("✅ Username entered")
-    except:
-        print("❌ Username field not found.")
-        raise
+    if not wait_and_fill(page, "#username", full_username):
+        raise Exception("Username field not found or fill failed")
+    print("✅ Username entered")
+
+    if not wait_and_click(page, ".checkmark-male"):
+        raise Exception("Gender field not clickable")
+    print("✅ Gender selected")
+
+    if not wait_and_fill(page, "#age", "24"):
+        raise Exception("Age dropdown not found")
+    print("✅ Age selected")
+
+    if not wait_and_fill(page, "#login_country", "United States"):
+        raise Exception("Country dropdown not found")
+    print("✅ Country selected")
+
+    time.sleep(2)  # give city list time to populate
 
     try:
-        page.click(".checkmark-male")
-        print("✅ Gender selected")
+        if not wait_and_fill(page, "#city", "New York"):
+            print("⚠️ City not found, using first available")
+            page.wait_for_selector("#city", timeout=5000)
+            page.select_option("#city", index=1)
     except:
-        raise
+        pass
+    print("✅ City selected")
 
-    try:
-        page.select_option("#age", "24")
-        print("✅ Age selected")
-    except:
-        raise
-
-    try:
-        page.select_option("#login_country", "United States")
-        print("✅ Country selected")
-    except:
-        raise
-
-    time.sleep(2)
-    try:
-        page.select_option("#city", "New York")
-        print("✅ City selected")
-    except:
-        print("⚠️ City not found, using first available")
-        page.select_option("#city", index=1)
-
-    try:
-        page.click("#startChatNow")
-        print("✅ Start button clicked")
-    except:
-        raise
+    if not wait_and_click(page, "#startChatNow"):
+        raise Exception("Start button not found")
+    print("✅ Start button clicked")
 
     time.sleep(2)
     try:
-        page.click(".btn.btn-primary.confirm_decline.agree")
+        wait_and_click(page, ".btn.btn-primary.confirm_decline.agree", timeout=5)
         print("✅ TOS popup accepted")
     except:
         print("⚠️ TOS popup not found – continuing.")
@@ -91,26 +104,35 @@ def login(page):
 
 def navigate_to_room(page):
     print("\n--- Navigating to room ---")
-    try:
-        page.goto(TOKEN_URL)
-        print("✅ Token endpoint visited")
-        time.sleep(2)
-    except Exception as e:
-        print(f"❌ Failed to load token endpoint: {e}")
-        raise
+    # Retry token endpoint up to 3 times
+    for attempt in range(3):
+        try:
+            page.goto(TOKEN_URL, timeout=WAIT_TIMEOUT * 1000)
+            break
+        except Exception as e:
+            print(f"⚠️ Token attempt {attempt+1} failed: {e}")
+            if attempt == 2:
+                raise
+            time.sleep(2)
+    print("✅ Token endpoint visited")
+    time.sleep(2)
 
     if "chatibrooms" not in page.url:
-        try:
-            page.goto(ROOM_URL)
-            print("✅ Room URL loaded")
-        except Exception as e:
-            print(f"❌ Failed to load room URL: {e}")
-            raise
+        for attempt in range(3):
+            try:
+                page.goto(ROOM_URL, timeout=WAIT_TIMEOUT * 1000)
+                break
+            except Exception as e:
+                print(f"⚠️ Room URL attempt {attempt+1} failed: {e}")
+                if attempt == 2:
+                    raise
+                time.sleep(2)
+        print("✅ Room URL loaded")
     else:
         print("✅ Already on room page.")
 
     try:
-        page.wait_for_selector(".received_withd_msg", timeout=WAIT_TIMEOUT*1000)
+        page.wait_for_selector(".received_withd_msg", timeout=WAIT_TIMEOUT * 1000)
         print("✅ Room messages detected.")
     except:
         print("⚠️ No messages yet, but room may be loading.")
@@ -136,19 +158,28 @@ def parse_message(raw):
     # user, since that bypasses the bot's own-message filter downstream.
     return None, None
 
+    
 def monitor_and_play(page, bot_username):
     print("\n--- Game monitor started ---")
     target = random.randint(1, 100)
     round_number = 0
     print(f"🎯 (DEBUG) Target: {target} (Round {round_number})")
 
-    send_message(page, "I'm thinking of a number between 1 and 100.")
+    # --- Wait for chat input to be ready ---
+    try:
+        page.wait_for_selector("#contenteditablediv", timeout=5000)
+        time.sleep(0.5)
+    except Exception as e:
+        print(f"⚠️ Chat input not found: {e}")
+        return  # exit monitor, will restart session
 
+    send_message(page, "I'm thinking of a number between 1 and 100.")
+    
     # --- Track last processed messages ---
     last_processed = None          # (user, msg, round) for game guesses
     last_admin_raw = None          # raw text of last processed admin command
 
-    poll_interval = 0.5
+    poll_interval = 0.3
     last_activity = time.time()
     paused = False
     ADMIN_COMMANDS = {"!pause", "!resume", "!status", "!newtarget", "!stop"}
@@ -161,7 +192,7 @@ def monitor_and_play(page, bot_username):
         if time.time() - last_activity > 60:
             print("⚠️ No activity for 60 seconds. Refreshing page...")
             page.reload()
-            # Reset tracking on reload
+            page.wait_for_load_state("networkidle")   # wait for page to settle
             last_processed = None
             last_admin_raw = None
             last_activity = time.time()
@@ -290,7 +321,16 @@ def main():
                 page = browser.new_page()
                 print("✅ Browser launched")
 
-                page.goto(SITE_URL)
+
+                for attempt in range(3):
+                    try:
+                        page.goto(SITE_URL, timeout=WAIT_TIMEOUT * 1000)
+                        break
+                    except Exception as e:
+                        print(f"⚠️ Site load attempt {attempt+1} failed: {e}")
+                        if attempt == 2:
+                            raise
+                        time.sleep(2)
                 print("📄 Main page loaded")
 
                 username = login(page)
