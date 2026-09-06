@@ -12,6 +12,7 @@ SITE_URL = "https://www.chatib.us"
 ROOM_URL = "https://www.chatibrooms.com/user/chatroom/sports-chat-room"
 TOKEN_URL = "https://www.chatib.us/auth/generateSsoToken/sports-chat-room"
 WAIT_TIMEOUT = 30
+ADMIN_USERNAME = "UnfriendLy"
 
 # ---------- Proxy List (optional) ----------
 PROXIES = [
@@ -128,73 +129,146 @@ def parse_message(raw):
         user = username_line.split("|")[0].strip()
         msg_lines = [l for l in lines if l != username_line]
         msg = " ".join(msg_lines).strip()
+        if not user:
+            return None, None
         return user, msg
-    return None, raw
+    # Couldn't identify a username line — do NOT return raw text with a None
+    # user, since that bypasses the bot's own-message filter downstream.
+    return None, None
 
 def monitor_and_play(page, bot_username):
     print("\n--- Game monitor started ---")
     target = random.randint(1, 100)
-    print(f"🎯 (DEBUG) Target: {target}")
+    round_number = 0
+    print(f"🎯 (DEBUG) Target: {target} (Round {round_number})")
 
     send_message(page, "I'm thinking of a number between 1 and 100.")
 
-    seen = set()
-    poll_interval = 1                 # Faster
+    # Track how many chat messages we've already scanned, so each message is
+    # processed exactly once — regardless of whether its text repeats
+    # something sent earlier. This replaces content-based dedup, which
+    # wrongly ignored a command/guess if the exact same text was ever sent
+    # before.
+    processed_count = 0
+    poll_interval = 1
     last_activity = time.time()
+    paused = False
 
     while True:
-        # Check if we're still on the room page (IP ban detection)
         if "chatibrooms" not in page.url:
             print("⚠️ Redirected away from room page – possible IP ban.")
             break
 
-        # Timeout detection for hung browser
         if time.time() - last_activity > 60:
             print("⚠️ No activity for 60 seconds. Refreshing page...")
             page.reload()
+            # NOTE: reload() does not clear the room's chat history, so we
+            # deliberately do NOT reset processed_count here — doing so
+            # would make the bot treat every old message as new again and
+            # reply to all of them in a burst. The shrink-safety check
+            # below still catches it if the reload genuinely returns fewer
+            # messages than we'd already processed.
             last_activity = time.time()
             continue
 
         try:
             elements = page.query_selector_all(".received_withd_msg")
-            for elem in elements:
+
+            # If the message list ever shrinks (e.g. unexpected DOM reset),
+            # our old count is stale — rescan from the top rather than
+            # silently skipping messages or crashing on a bad slice.
+            if processed_count > len(elements):
+                processed_count = 0
+
+            new_elements = elements[processed_count:]
+            acted_this_poll = False  # only act on ONE game command per poll
+            stop_index = len(new_elements)  # how far into new_elements we got
+
+            for idx, elem in enumerate(new_elements):
                 raw = elem.inner_text().strip()
                 if not raw:
                     continue
 
                 user, msg = parse_message(raw)
-                if user == bot_username:
-                    continue
-                if not msg.lower().startswith("!guess"):
+                # Skip anything we couldn't attribute to a user, and skip
+                # the bot's own messages.
+                if user is None or user == bot_username:
                     continue
 
-                key = (user, msg)
-                if key in seen:
+                lower_msg = msg.lower().strip()
+
+                # ---------------- ADMIN COMMANDS ----------------
+                # Not subject to the one-per-poll limit or pause state.
+                if user == ADMIN_USERNAME and lower_msg.startswith("!"):
+                    if lower_msg == "!pause":
+                        paused = True
+                        send_message(page, "⏸️ Game paused by admin.")
+                    elif lower_msg == "!resume":
+                        paused = False
+                        send_message(page, "▶️ Game resumed by admin.")
+                    elif lower_msg == "!status":
+                        state = "paused" if paused else "running"
+                        send_message(
+                            page,
+                            f"ℹ️ Status: {state} | Round {round_number} | Target={target}",
+                        )
+                    elif lower_msg == "!newtarget":
+                        target = random.randint(1, 100)
+                        round_number += 1
+                        print(f"🎯 (DEBUG) Admin reset target: {target} (Round {round_number})")
+                        send_message(page, f"🎲 Admin reset the number. (Round {round_number})")
+                    elif lower_msg == "!stop":
+                        send_message(page, "🛑 Bot stopping (admin command).")
+                        print("🛑 Stopped via admin command.")
+                        return "stop"
                     continue
-                seen.add(key)
+
+                if paused:
+                    continue
+
+                if not lower_msg.startswith("!guess"):
+                    continue
+
+                if acted_this_poll:
+                    # A guess already got a response this poll — stop here
+                    # and pick this message up on the *next* poll instead of
+                    # evaluating it against a target that may have just
+                    # changed underneath us.
+                    stop_index = idx
+                    break
 
                 parts = msg.split()
                 if len(parts) != 2:
                     send_message(page, f"{user}, use: !guess [number]")
+                    acted_this_poll = True
                     continue
 
                 try:
                     guess = int(parts[1])
                 except ValueError:
                     send_message(page, f"{user}, please provide a valid number.")
+                    acted_this_poll = True
                     continue
 
                 if guess == target:
                     reply = f"Correct, {user}! The number was {target}. New round!"
                     send_message(page, reply)
+                    # ---- NEW ROUND ----
                     target = random.randint(1, 100)
-                    seen.clear()
-                    print(f"🎯 (DEBUG) New target: {target}")
-                    send_message(page, "I'm thinking of a new number between 1 and 100.")
+                    round_number += 1
+                    print(f"🎯 (DEBUG) New target: {target} (Round {round_number})")
+                    send_message(page, f"I'm thinking of a new number between 1 and 100. (Round {round_number})")
                 elif guess < target:
                     send_message(page, f"Too low, {user}!")
                 else:
                     send_message(page, f"Too high, {user}!")
+
+                acted_this_poll = True
+
+            # Mark as processed everything up through stop_index. If we
+            # deferred a guess (stop_index < len(new_elements)), that one
+            # and anything after it will be picked up again next poll.
+            processed_count += stop_index
 
             time.sleep(poll_interval)
             last_activity = time.time()
@@ -203,6 +277,7 @@ def monitor_and_play(page, bot_username):
             print(f"⚠️ Error in monitor loop: {e}")
             time.sleep(poll_interval)
 
+            
 def main():
     proxy_index = 0
     retry_count = 0
@@ -231,14 +306,20 @@ def main():
                 username = login(page)
                 final_url = navigate_to_room(page)
 
+                result = None
                 if "chatibrooms" in final_url:
                     retry_count = 0
-                    monitor_and_play(page, username)
+                    result = monitor_and_play(page, username)
                 else:
                     print(f"⚠️ Not on room page – retrying...")
                     retry_count += 1
 
                 browser.close()
+
+                if result == "stop":
+                    print("🛑 Admin stop received — bot thread exiting (Flask keeps serving).")
+                    return
+
                 print("🔄 Session ended, restarting...")
 
         except Exception as e:
