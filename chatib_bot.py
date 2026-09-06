@@ -6,7 +6,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select
 from selenium.common.exceptions import TimeoutException
-from webdriver_manager.chrome import ChromeDriverManager   # <--- new import
 from flask import Flask
 import threading
 import time
@@ -41,7 +40,7 @@ def setup_driver():
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
 
-    # Use the system driver built into the image
+    # Use the driver installed during the Docker build
     service = Service(executable_path="/usr/local/bin/chromedriver")
     driver = webdriver.Chrome(service=service, options=options)
 
@@ -49,7 +48,6 @@ def setup_driver():
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     )
     return driver
-
 def send_message(driver, text):
     try:
         input_box = WebDriverWait(driver, 10).until(
