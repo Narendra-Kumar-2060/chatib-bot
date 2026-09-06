@@ -9,8 +9,8 @@ app = Flask(__name__)
 
 # ---------- Configuration ----------
 SITE_URL = "https://www.chatib.us"
-ROOM_URL = "https://www.chatibrooms.com/user/chatroom/philosophy-chat-room"
-TOKEN_URL = "https://www.chatib.us/auth/generateSsoToken/philosophy-chat-room"
+ROOM_URL = "https://www.chatibrooms.com/user/chatroom/sports-chat-room"
+TOKEN_URL = "https://www.chatib.us/auth/generateSsoToken/sports-chat-room"
 WAIT_TIMEOUT = 30
 
 # ---------- Proxy List (optional) ----------
