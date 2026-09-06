@@ -1,16 +1,11 @@
 from selenium import webdriver
-from selenium.webdriver.firefox.service import Service as FirefoxService
-from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select
 from selenium.common.exceptions import TimeoutException
-from selenium.webdriver.chrome.service import Service as ChromeService
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
 from flask import Flask
 import threading
 import time
@@ -31,6 +26,7 @@ def generate_letter_string(length=6):
 
 
 def setup_driver():
+    """Headless Chrome driver using manually uploaded ChromeDriver."""
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
@@ -44,7 +40,8 @@ def setup_driver():
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
 
-    service = Service(ChromeDriverManager().install())
+    # Use the manually uploaded driver
+    service = Service(executable_path="/app/drivers/chromedriver")
     driver = webdriver.Chrome(service=service, options=options)
 
     driver.execute_script(
@@ -52,6 +49,7 @@ def setup_driver():
     )
 
     return driver
+
 
 def send_message(driver, text):
     try:
@@ -68,6 +66,7 @@ def send_message(driver, text):
     except Exception as e:
         print(f"⚠️ Failed to send message: {e}")
         return False
+
 
 def login(driver, wait):
     print("\n--- Logging in ---")
@@ -154,6 +153,7 @@ def login(driver, wait):
     print("✅ Login complete.")
     return full_username
 
+
 def navigate_to_room(driver, wait):
     print("\n--- Navigating to room ---")
     try:
@@ -185,6 +185,7 @@ def navigate_to_room(driver, wait):
     print(f"📍 Final URL: {driver.current_url}")
     return driver.current_url
 
+
 def parse_message(raw):
     lines = raw.splitlines()
     username_line = None
@@ -198,6 +199,7 @@ def parse_message(raw):
         msg = " ".join(msg_lines).strip()
         return user, msg
     return None, raw
+
 
 def monitor_and_play(driver, bot_username):
     print("\n--- Game monitor started (Ctrl+C to stop) ---")
@@ -279,11 +281,14 @@ def monitor_and_play(driver, bot_username):
     except KeyboardInterrupt:
         print("\n🛑 Game monitor stopped.")
 
+
 def main():
     while True:
         driver = None
         try:
+            print("🔄 Setting up driver...")
             driver = setup_driver()
+            print("✅ Driver ready")
             wait = WebDriverWait(driver, WAIT_TIMEOUT)
 
             driver.get(SITE_URL)
@@ -304,7 +309,9 @@ def main():
 
         except Exception as e:
             print(f"\n❌ ERROR: {e}")
-            time.sleep(10)  # Wait before retrying
+            import traceback
+            traceback.print_exc()
+            time.sleep(10)
 
         finally:
             if driver:
@@ -312,9 +319,11 @@ def main():
             print("🔄 Restarting in 10 seconds...")
             time.sleep(10)
 
+
 @app.route('/')
 def home():
     return "Chatib Bot is running!"
+
 
 if __name__ == "__main__":
     import sys
