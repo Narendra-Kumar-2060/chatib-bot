@@ -6,6 +6,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select
 from selenium.common.exceptions import TimeoutException
+from flask import Flask
+import threading
 import time
 import random
 import string
@@ -15,6 +17,8 @@ SITE_URL = "https://www.chatib.us"
 ROOM_URL = "https://www.chatibrooms.com/user/chatroom/philosophy-chat-room"
 TOKEN_URL = "https://www.chatib.us/auth/generateSsoToken/philosophy-chat-room"
 WAIT_TIMEOUT = 30
+app = Flask(__name__)
+
 
 # ---------- Helper Functions ----------
 def generate_letter_string(length=6):
@@ -198,7 +202,7 @@ def monitor_and_play(driver, bot_username):
 
     send_message(
         driver,
-        "🎯 I'm thinking of a number between 1 and 100. Guess with `!guess <number>`",
+        "I'm thinking of a number between 1 and 100.",
     )
 
     seen = set()
@@ -226,26 +230,26 @@ def monitor_and_play(driver, bot_username):
 
                     parts = msg.split()
                     if len(parts) != 2:
-                        send_message(driver, f"❌ {user}, use: `!guess <number>`")
+                        send_message(driver, f"{user}, use: !guess [number]")
                         continue
 
                     try:
                         guess = int(parts[1])
                     except ValueError:
                         send_message(
-                            driver, f"❌ {user}, please provide a valid number."
+                            driver, f"{user}, please provide a valid number."
                         )
                         continue
 
                     if not game_active:
                         send_message(
-                            driver, "A new round has started! Use `!guess <number>`"
+                            driver, "A new round has started!"
                         )
                         continue
 
                     if guess == target:
                         reply = (
-                            f"🎉 Correct, {user}! The number was {target}. New round!"
+                            f"Correct, {user}! The number was {target}. New round!"
                         )
                         send_message(driver, reply)
                         target = random.randint(1, 100)
@@ -254,12 +258,12 @@ def monitor_and_play(driver, bot_username):
                         print(f"🎯 (DEBUG) New target: {target}")
                         send_message(
                             driver,
-                            "🎯 I'm thinking of a new number between 1 and 100. Guess with `!guess <number>`",
+                            "I'm thinking of a new number between 1 and 100.",
                         )
                     elif guess < target:
-                        send_message(driver, f"📈 Too low, {user}!")
+                        send_message(driver, f"Too low, {user}!")
                     else:
-                        send_message(driver, f"📉 Too high, {user}!")
+                        send_message(driver, f"Too high, {user}!")
 
                 time.sleep(poll_interval)
 
@@ -271,33 +275,47 @@ def monitor_and_play(driver, bot_username):
         print("\n🛑 Game monitor stopped.")
 
 def main():
-    driver = None
-    try:
-        driver = setup_driver()
-        wait = WebDriverWait(driver, WAIT_TIMEOUT)
+    while True:
+        driver = None
+        try:
+            driver = setup_driver()
+            wait = WebDriverWait(driver, WAIT_TIMEOUT)
 
-        driver.get(SITE_URL)
-        print("📄 Main page loaded")
+            driver.get(SITE_URL)
+            print("📄 Main page loaded")
 
-        username = login(driver, wait)
-        final_url = navigate_to_room(driver, wait)
+            username = login(driver, wait)
+            final_url = navigate_to_room(driver, wait)
 
-        if "chatibrooms" in final_url:
-            monitor_and_play(driver, username)
-        else:
-            print(f"⚠️ Not on room page – cannot start game.")
+            if "chatibrooms" in final_url:
+                monitor_and_play(driver, username)
+            else:
+                print(f"⚠️ Not on room page – retrying...")
 
-        print("\n" + "=" * 50)
-        print("✅ SESSION COMPLETE!")
-        print(f"👤 Username: {username}")
-        print("=" * 50)
+            print("\n" + "=" * 50)
+            print("✅ SESSION COMPLETE!")
+            print(f"👤 Username: {username}")
+            print("=" * 50)
 
-    except Exception as e:
-        print(f"\n❌ ERROR: {e}")
+        except Exception as e:
+            print(f"\n❌ ERROR: {e}")
+            time.sleep(10)  # Wait before retrying
 
-    finally:
-        if driver:
-            driver.quit()
+        finally:
+            if driver:
+                driver.quit()
+            print("🔄 Restarting in 10 seconds...")
+            time.sleep(10)
+
+@app.route('/')
+def home():
+    return "Chatib Bot is running!"
 
 if __name__ == "__main__":
-    main()
+    # Start the bot in a background thread
+    bot_thread = threading.Thread(target=main)
+    bot_thread.daemon = True
+    bot_thread.start()
+    
+    # Run the web server
+    app.run(host='0.0.0.0', port=8080)
