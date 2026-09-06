@@ -30,7 +30,7 @@ def setup_driver():
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-dev-shm-usage")   # important
     options.add_argument("--disable-gpu")
     options.add_argument("--disable-features=NetworkService")
     options.add_argument("--window-size=1920,1080")
@@ -40,7 +40,6 @@ def setup_driver():
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
 
-    # Use the driver installed during the Docker build
     service = Service(executable_path="/usr/local/bin/chromedriver")
     driver = webdriver.Chrome(service=service, options=options)
 
@@ -48,6 +47,7 @@ def setup_driver():
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     )
     return driver
+    
 def send_message(driver, text):
     try:
         input_box = WebDriverWait(driver, 10).until(

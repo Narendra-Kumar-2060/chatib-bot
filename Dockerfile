@@ -1,21 +1,16 @@
 FROM python:3.10-slim
 
-# Install dependencies
 RUN apt-get update && apt-get install -y \
-    wget \
-    curl \
-    gnupg \
-    unzip \
-    jq \
+    wget curl gnupg unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Google Chrome (latest stable)
+# Install Chrome
 RUN wget -q -O- https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor > /usr/share/keyrings/google-chrome.gpg \
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
-# Get the installed Chrome version and download matching ChromeDriver
+# Install matching ChromeDriver
 RUN CHROME_VERSION=$(google-chrome --version | awk '{print $3}') \
     && CHROME_MAJOR=$(echo $CHROME_VERSION | cut -d'.' -f1) \
     && LATEST_RELEASE=$(curl -s "https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_$CHROME_MAJOR") \
@@ -25,12 +20,12 @@ RUN CHROME_VERSION=$(google-chrome --version | awk '{print $3}') \
     && mv chromedriver-linux64/chromedriver /usr/local/bin/ \
     && rm -rf chromedriver-linux64.zip chromedriver-linux64
 
-# Copy and install Python dependencies
+# **CRITICAL FIX: writable home directory**
+RUN mkdir -p /home/daemon && chown daemon:daemon /home/daemon
+ENV HOME=/home/daemon
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy your bot script
 COPY chatib_bot.py .
-
-# Run the bot
 CMD ["python", "chatib_bot.py"]
