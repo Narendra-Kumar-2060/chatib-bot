@@ -1,148 +1,79 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import Select
-from selenium.common.exceptions import TimeoutException
+from playwright.sync_api import sync_playwright
 from flask import Flask
 import threading
 import time
 import random
 import string
 
-
+app = Flask(__name__)
 
 # ---------- Configuration ----------
 SITE_URL = "https://www.chatib.us"
 ROOM_URL = "https://www.chatibrooms.com/user/chatroom/philosophy-chat-room"
 TOKEN_URL = "https://www.chatib.us/auth/generateSsoToken/philosophy-chat-room"
 WAIT_TIMEOUT = 30
-app = Flask(__name__)
 
-
-# ---------- Helper Functions ----------
 def generate_letter_string(length=6):
     return "".join(random.choices(string.ascii_letters, k=length))
 
-def setup_driver():
-    options = Options()
-    options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")   # important
-    options.add_argument("--disable-gpu")
-    options.add_argument("--disable-features=NetworkService")
-    options.add_argument("--window-size=1920,1080")
-    options.add_argument("--disable-features=VizDisplayCompositor")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument(
-        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    )
-
-    service = Service(executable_path="/usr/local/bin/chromedriver")
-    driver = webdriver.Chrome(service=service, options=options)
-
-    driver.execute_script(
-        "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-    )
-    return driver
-    
-def send_message(driver, text):
+def send_message(page, text):
     try:
-        input_box = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "#contenteditablediv"))
-        )
-        input_box.click()
-        input_box.clear()
-        input_box.send_keys(text)
-        send_btn = driver.find_element(By.CSS_SELECTOR, ".msg_send_btn")
-        send_btn.click()
+        page.fill("#contenteditablediv", text)
+        page.click(".msg_send_btn")
         time.sleep(0.5)
         return True
     except Exception as e:
         print(f"⚠️ Failed to send message: {e}")
         return False
 
-
-def login(driver, wait):
+def login(page):
     print("\n--- Logging in ---")
     random_username = generate_letter_string(6)
     random_number = random.randint(1000, 9999)
     full_username = f"LemonTree{random_number}"
 
     try:
-        username_field = wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "#username"))
-        )
-        username_field.send_keys(full_username)
+        page.fill("#username", full_username)
         print("✅ Username entered")
-    except TimeoutException:
+    except:
         print("❌ Username field not found.")
         raise
 
     try:
-        gender = wait.until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, ".checkmark-male"))
-        )
-        gender.click()
+        page.click(".checkmark-male")
         print("✅ Gender selected")
-    except TimeoutException:
+    except:
         raise
 
     try:
-        age_select = Select(
-            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#age")))
-        )
-        age_select.select_by_visible_text("24")
+        page.select_option("#age", "24")
         print("✅ Age selected")
-    except TimeoutException:
+    except:
         raise
 
     try:
-        country_select = Select(
-            wait.until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "#login_country"))
-            )
-        )
-        country_select.select_by_visible_text("United States")
+        page.select_option("#login_country", "United States")
         print("✅ Country selected")
-    except TimeoutException:
+    except:
         raise
 
     time.sleep(2)
     try:
-        city_select = Select(
-            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#city")))
-        )
-        try:
-            city_select.select_by_visible_text("New York")
-        except:
-            if len(city_select.options) > 1:
-                city_select.select_by_index(1)
-                print(
-                    f"✅ City selected (fallback): {city_select.first_selected_option.text}"
-                )
-    except TimeoutException:
-        raise
+        page.select_option("#city", "New York")
+        print("✅ City selected")
+    except:
+        print("⚠️ City not found, using first available")
+        page.select_option("#city", index=1)
 
     try:
-        start_btn = wait.until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, "#startChatNow"))
-        )
-        start_btn.click()
+        page.click("#startChatNow")
         print("✅ Start button clicked")
-    except TimeoutException:
+    except:
         raise
 
     time.sleep(2)
     try:
-        accept_btn = wait.until(
-            EC.element_to_be_clickable(
-                (By.CSS_SELECTOR, ".btn.btn-primary.confirm_decline.agree")
-            )
-        )
-        accept_btn.click()
+        page.click(".btn.btn-primary.confirm_decline.agree")
         print("✅ TOS popup accepted")
     except:
         print("⚠️ TOS popup not found – continuing.")
@@ -150,20 +81,19 @@ def login(driver, wait):
     print("✅ Login complete.")
     return full_username
 
-
-def navigate_to_room(driver, wait):
+def navigate_to_room(page):
     print("\n--- Navigating to room ---")
     try:
-        driver.get(TOKEN_URL)
+        page.goto(TOKEN_URL)
         print("✅ Token endpoint visited")
         time.sleep(2)
     except Exception as e:
         print(f"❌ Failed to load token endpoint: {e}")
         raise
 
-    if "chatibrooms" not in driver.current_url:
+    if "chatibrooms" not in page.url:
         try:
-            driver.get(ROOM_URL)
+            page.goto(ROOM_URL)
             print("✅ Room URL loaded")
         except Exception as e:
             print(f"❌ Failed to load room URL: {e}")
@@ -172,16 +102,13 @@ def navigate_to_room(driver, wait):
         print("✅ Already on room page.")
 
     try:
-        wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, ".received_withd_msg"))
-        )
+        page.wait_for_selector(".received_withd_msg", timeout=WAIT_TIMEOUT*1000)
         print("✅ Room messages detected.")
-    except TimeoutException:
+    except:
         print("⚠️ No messages yet, but room may be loading.")
 
-    print(f"📍 Final URL: {driver.current_url}")
-    return driver.current_url
-
+    print(f"📍 Final URL: {page.url}")
+    return page.url
 
 def parse_message(raw):
     lines = raw.splitlines()
@@ -197,148 +124,107 @@ def parse_message(raw):
         return user, msg
     return None, raw
 
-
-def monitor_and_play(driver, bot_username):
-    print("\n--- Game monitor started (Ctrl+C to stop) ---")
+def monitor_and_play(page, bot_username):
+    print("\n--- Game monitor started ---")
     target = random.randint(1, 100)
-    game_active = True
     print(f"🎯 (DEBUG) Target: {target}")
 
-    send_message(
-        driver,
-        "I'm thinking of a number between 1 and 100.",
-    )
+    send_message(page, "I'm thinking of a number between 1 and 100.")
 
     seen = set()
     poll_interval = 2
 
-    try:
-        while True:
-            try:
-                elements = driver.find_elements(By.CSS_SELECTOR, ".received_withd_msg")
-                for elem in elements:
-                    raw = elem.text.strip()
-                    if not raw:
-                        continue
+    while True:
+        try:
+            elements = page.query_selector_all(".received_withd_msg")
+            for elem in elements:
+                raw = elem.inner_text().strip()
+                if not raw:
+                    continue
 
-                    user, msg = parse_message(raw)
-                    if user == bot_username:
-                        continue
-                    if not msg.lower().startswith("!guess"):
-                        continue
+                user, msg = parse_message(raw)
+                if user == bot_username:
+                    continue
+                if not msg.lower().startswith("!guess"):
+                    continue
 
-                    key = (user, msg)
-                    if key in seen:
-                        continue
-                    seen.add(key)
+                key = (user, msg)
+                if key in seen:
+                    continue
+                seen.add(key)
 
-                    parts = msg.split()
-                    if len(parts) != 2:
-                        send_message(driver, f"{user}, use: !guess [number]")
-                        continue
+                parts = msg.split()
+                if len(parts) != 2:
+                    send_message(page, f"{user}, use: !guess [number]")
+                    continue
 
-                    try:
-                        guess = int(parts[1])
-                    except ValueError:
-                        send_message(
-                            driver, f"{user}, please provide a valid number."
-                        )
-                        continue
+                try:
+                    guess = int(parts[1])
+                except ValueError:
+                    send_message(page, f"{user}, please provide a valid number.")
+                    continue
 
-                    if not game_active:
-                        send_message(
-                            driver, "A new round has started!"
-                        )
-                        continue
+                if guess == target:
+                    reply = f"Correct, {user}! The number was {target}. New round!"
+                    send_message(page, reply)
+                    target = random.randint(1, 100)
+                    seen.clear()
+                    print(f"🎯 (DEBUG) New target: {target}")
+                    send_message(page, "I'm thinking of a new number between 1 and 100.")
+                elif guess < target:
+                    send_message(page, f"Too low, {user}!")
+                else:
+                    send_message(page, f"Too high, {user}!")
 
-                    if guess == target:
-                        reply = (
-                            f"Correct, {user}! The number was {target}. New round!"
-                        )
-                        send_message(driver, reply)
-                        target = random.randint(1, 100)
-                        game_active = True
-                        seen.clear()
-                        print(f"🎯 (DEBUG) New target: {target}")
-                        send_message(
-                            driver,
-                            "I'm thinking of a new number between 1 and 100.",
-                        )
-                    elif guess < target:
-                        send_message(driver, f"Too low, {user}!")
-                    else:
-                        send_message(driver, f"Too high, {user}!")
+            time.sleep(poll_interval)
 
-                time.sleep(poll_interval)
-
-            except Exception as e:
-                print(f"⚠️ Error in monitor loop: {e}")
-                time.sleep(poll_interval)
-
-    except KeyboardInterrupt:
-        print("\n🛑 Game monitor stopped.")
-
+        except Exception as e:
+            print(f"⚠️ Error in monitor loop: {e}")
+            time.sleep(poll_interval)
 
 def main():
     while True:
-        driver = None
         try:
-            print("🔄 Setting up driver...")
-            driver = setup_driver()
-            print("✅ Driver ready")
-            wait = WebDriverWait(driver, WAIT_TIMEOUT)
+            with sync_playwright() as p:
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=["--no-sandbox", "--disable-dev-shm-usage"]
+                )
+                page = browser.new_page()
+                print("✅ Browser launched")
 
-            driver.get(SITE_URL)
-            print("📄 Main page loaded")
+                page.goto(SITE_URL)
+                print("📄 Main page loaded")
 
-            username = login(driver, wait)
-            final_url = navigate_to_room(driver, wait)
+                username = login(page)
+                final_url = navigate_to_room(page)
 
-            if "chatibrooms" in final_url:
-                monitor_and_play(driver, username)
-            else:
-                print(f"⚠️ Not on room page – retrying...")
+                if "chatibrooms" in final_url:
+                    monitor_and_play(page, username)
+                else:
+                    print(f"⚠️ Not on room page – retrying...")
 
-            print("\n" + "=" * 50)
-            print("✅ SESSION COMPLETE!")
-            print(f"👤 Username: {username}")
-            print("=" * 50)
+                browser.close()
+                print("🔄 Session ended, restarting...")
 
         except Exception as e:
             print(f"\n❌ ERROR: {e}")
-            import traceback
-            traceback.print_exc()
             time.sleep(10)
 
-        finally:
-            if driver:
-                driver.quit()
-            print("🔄 Restarting in 10 seconds...")
-            time.sleep(10)
-
+        time.sleep(5)
 
 @app.route('/')
 def home():
     return "Chatib Bot is running!"
 
-
 if __name__ == "__main__":
-    import sys
-
     def run_bot():
-        try:
-            print("🚀 Bot thread started")
-            main()
-        except Exception as e:
-            print(f"❌ Bot thread crashed: {e}")
-            import traceback
-            traceback.print_exc()
+        print("🚀 Bot thread started")
+        main()
 
-    # Start the bot in a background thread
     bot_thread = threading.Thread(target=run_bot)
     bot_thread.daemon = True
     bot_thread.start()
     print("✅ Bot thread launched")
 
-    # Run the web server
     app.run(host='0.0.0.0', port=8080)
