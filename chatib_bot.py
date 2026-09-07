@@ -54,16 +54,19 @@ def wait_and_select(page, selector, value, timeout=WAIT_TIMEOUT):
         print(f"⚠️ Failed to select {selector}: {e}")
         return False
 
-def send_message(page, text):
-    try:
-        page.wait_for_selector("#contenteditablediv", timeout=5000)
-        page.fill("#contenteditablediv", text)
-        page.click(".msg_send_btn")
-        time.sleep(0.2)
-        return True
-    except Exception as e:
-        print(f"⚠️ Failed to send message: {e}")
-        return False
+def send_message(page, text, first=False):
+    if first:
+        # extra waits only for first message
+        page.wait_for_selector("#contenteditablediv[contenteditable='true']", timeout=5000)
+        time.sleep(1)
+        page.wait_for_selector(".msg_send_btn", timeout=3000)
+    else:
+        # fast path for all other messages
+        page.wait_for_selector("#contenteditablediv", timeout=3000)
+
+    page.fill("#contenteditablediv", text)
+    page.press("#contenteditablediv", "Enter")
+    time.sleep(0.2)
 
 def login(page):
     print("\n--- Logging in ---")
@@ -186,7 +189,7 @@ def monitor_and_play(page, bot_username):
         print(f"⚠️ Chat input not found: {e}")
         return  # exit monitor, will restart session
 
-    send_message(page, "I'm thinking of a number between 1 and 100.")
+    send_message(page, "I'm thinking of a number between 1 and 100.", first=True)
     
     # --- Track last processed messages ---
     last_processed = None          # (user, msg, round) for game guesses
