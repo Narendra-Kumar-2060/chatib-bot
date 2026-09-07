@@ -192,7 +192,7 @@ def monitor_and_play(page, bot_username):
     last_processed = None          # (user, msg, round) for game guesses
     last_admin_raw = None          # raw text of last processed admin command
 
-    poll_interval = 0.3
+    poll_interval = 1.0
     last_activity = time.time()
     paused = False
     ADMIN_COMMANDS = {"!pause", "!resume", "!status", "!newtarget", "!stop"}
@@ -329,9 +329,23 @@ def main():
             with sync_playwright() as p:
                 browser = p.chromium.launch(
                     headless=True,
-                    args=browser_args
+                    args=[
+                        "--no-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--disable-gpu",
+                        "--disable-setuid-sandbox",
+                        "--disable-software-rasterizer",
+                        "--disable-features=VizDisplayCompositor",
+                        "--disable-background-timer-throttling",
+                        "--disable-backgrounding-occluded-windows",
+                        "--disable-renderer-backgrounding",
+                        "--disable-ipc-flooding-protection",
+                        "--max_old_space_size=256",
+                    ]
                 )
                 page = browser.new_page()
+                # Block heavy resources to save RAM
+                page.route("**/*.{png,jpg,jpeg,gif,svg,css,woff,woff2,ttf}", lambda route: route.abort())
                 print("✅ Browser launched")
 
 
