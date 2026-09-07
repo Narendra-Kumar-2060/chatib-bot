@@ -44,6 +44,16 @@ def wait_and_click(page, selector, timeout=WAIT_TIMEOUT):
         print(f"⚠️ Failed to click {selector}: {e}")
         return False
 
+def wait_and_select(page, selector, value, timeout=WAIT_TIMEOUT):
+    """Wait for a <select> element and select an option by visible text."""
+    try:
+        page.wait_for_selector(selector, timeout=timeout * 1000)
+        page.select_option(selector, value)
+        return True
+    except Exception as e:
+        print(f"⚠️ Failed to select {selector}: {e}")
+        return False
+
 def send_message(page, text):
     try:
         page.wait_for_selector("#contenteditablediv", timeout=5000)
@@ -69,18 +79,21 @@ def login(page):
         raise Exception("Gender field not clickable")
     print("✅ Gender selected")
 
-    if not wait_and_fill(page, "#age", "24"):
-        raise Exception("Age dropdown not found")
+    # --- Age dropdown ---
+    if not wait_and_select(page, "#age", "24"):
+        raise Exception("Age dropdown selection failed")
     print("✅ Age selected")
 
-    if not wait_and_fill(page, "#login_country", "United States"):
-        raise Exception("Country dropdown not found")
+    # --- Country dropdown ---
+    if not wait_and_select(page, "#login_country", "United States"):
+        raise Exception("Country dropdown selection failed")
     print("✅ Country selected")
 
     time.sleep(2)  # give city list time to populate
 
+    # --- City dropdown ---
     try:
-        if not wait_and_fill(page, "#city", "New York"):
+        if not wait_and_select(page, "#city", "New York"):
             print("⚠️ City not found, using first available")
             page.wait_for_selector("#city", timeout=5000)
             page.select_option("#city", index=1)
